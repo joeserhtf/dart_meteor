@@ -43,14 +43,14 @@ class _MyAppState extends State<MyApp> {
                   if (snapshot.hasData) {
                     if (snapshot.data.status ==
                         DdpConnectionStatusValues.connected) {
-                      return RaisedButton(
+                      return ElevatedButton(
                         child: Text('Disconnect'),
                         onPressed: () {
                           meteor.disconnect();
                         },
                       );
                     }
-                    return RaisedButton(
+                    return ElevatedButton(
                       child: Text('Connect'),
                       onPressed: () {
                         meteor.reconnect();
@@ -73,14 +73,14 @@ class _MyAppState extends State<MyApp> {
                   stream: meteor.userId(),
                   builder: (context, snapshot) {
                     if (snapshot.hasData) {
-                      return RaisedButton(
+                      return ElevatedButton(
                         child: Text('Logout'),
                         onPressed: () {
                           meteor.logout();
                         },
                       );
                     }
-                    return RaisedButton(
+                    return ElevatedButton(
                       child: Text('Login'),
                       onPressed: () {
                         meteor.loginWithPassword(
@@ -97,7 +97,7 @@ class _MyAppState extends State<MyApp> {
                   return Text('User: ----');
                 },
               ),
-              RaisedButton(
+              ElevatedButton(
                 child: Text('Method Call'),
                 onPressed: _callMethod,
               ),

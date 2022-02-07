@@ -10,7 +10,7 @@ enum DdpConnectionStatusValues {
   connecting,
   failed,
   waiting,
-  offline
+  offline,
 }
 
 class DdpConnectionStatus {
@@ -20,12 +20,13 @@ class DdpConnectionStatus {
   Duration retryTime;
   String reason;
 
-  DdpConnectionStatus(
-      {this.connected,
-      this.status,
-      this.retryCount,
-      this.retryTime,
-      this.reason});
+  DdpConnectionStatus({
+    this.connected,
+    this.status,
+    this.retryCount,
+    this.retryTime,
+    this.reason,
+  });
 
   @override
   String toString() {
@@ -77,8 +78,7 @@ class DdpClient {
   final int PONG_WITHIN_SEC = 5;
   final Random _random = Random.secure();
 
-  StreamController<DdpConnectionStatus> _statusStreamController =
-      StreamController();
+  StreamController<DdpConnectionStatus> _statusStreamController = StreamController();
   StreamController<dynamic> dataStreamController = StreamController();
   DdpConnectionStatus _connectionStatus;
   String _url;
@@ -123,8 +123,7 @@ class DdpClient {
   /// The function to call. It will be called with a single argument, the connection object that is reconnecting.
   void onReconnect(void callback(OnReconnectionCallback reconnection)) {
     String id = _generateUID(16);
-    var onReconnectCallback =
-        OnReconnectionCallback(ddpClient: this, id: id, callback: callback);
+    var onReconnectCallback = OnReconnectionCallback(ddpClient: this, id: id, callback: callback);
     _onReconnectCallbacks[id] = onReconnectCallback;
   }
 
@@ -133,8 +132,7 @@ class DdpClient {
     return base64Url.encode(values);
   }
 
-  SubscriptionHandler subscribe(String name, List<dynamic> params,
-      {Function onStop(dynamic error), Function onReady}) {
+  SubscriptionHandler subscribe(String name, List<dynamic> params, {Function onStop(dynamic error), Function onReady}) {
     String id = name + '-' + _generateUID(16);
     _subscriptions[id] = SubscriptionCallback(onStop: onStop, onReady: onReady);
     var handler = SubscriptionHandler(this, id);
@@ -207,8 +205,7 @@ class DdpClient {
       _connectionStatus.reason = null;
       _statusStreamController.sink.add(_connectionStatus);
       try {
-        WebSocket socket =
-            await WebSocket(_url); //.timeout(Duration(seconds: 5));
+        WebSocket socket = await WebSocket(_url); //.timeout(Duration(seconds: 5));
         _connectionStatus.retryCount = 0;
         _connectionStatus.retryTime = Duration(seconds: 1);
         _socket = socket;
@@ -221,8 +218,7 @@ class DdpClient {
         _connectionStatus.reason = err.toString();
         _statusStreamController.sink.add(_connectionStatus);
         _socket = null;
-        printDebug(
-            'ScheduleReconnect due to websocket exception while trying to connect');
+        printDebug('ScheduleReconnect due to websocket exception while trying to connect');
         _scheduleReconnect();
       }
       ;
@@ -236,8 +232,7 @@ class DdpClient {
       if (_connectionStatus.retryCount <= _maxRetryCount) {
         _connectionStatus.connected = false;
         _connectionStatus.status = DdpConnectionStatusValues.waiting;
-        _connectionStatus.retryTime =
-            Duration(seconds: min(5 * (_connectionStatus.retryCount - 1), 30));
+        _connectionStatus.retryTime = Duration(seconds: min(5 * (_connectionStatus.retryCount - 1), 30));
         _connectionStatus.reason = null;
         _statusStreamController.sink.add(_connectionStatus);
         printDebug('Retry to connect in ${_connectionStatus.retryTime}');
@@ -290,8 +285,7 @@ class DdpClient {
           printDebug('Disconnect due to not receive PONG');
           printDebug('PING was sent since $sentTime');
           printDebug('Current time is ${DateTime.now()}');
-          printDebug(
-              'Diff since PING sent is ${DateTime.now().difference(sentTime)}');
+          printDebug('Diff since PING sent is ${DateTime.now().difference(sentTime)}');
           disconnect();
         }
       });
@@ -332,8 +326,7 @@ class DdpClient {
     }
   }
 
-  void _sendMsgMethod(String method, List<dynamic> params, String id,
-      {Map<String, dynamic> randomSeed}) {
+  void _sendMsgMethod(String method, List<dynamic> params, String id, {Map<String, dynamic> randomSeed}) {
     if (_socket != null) {
       var data = {
         'msg': 'method',
@@ -374,20 +367,17 @@ class DdpClient {
           _pingPeriodicTimer = null;
         }
 
-        _pingPeriodicTimer =
-            Timer.periodic(Duration(seconds: PING_SEC_INTERVAL), (timer) {
+        _pingPeriodicTimer = Timer.periodic(Duration(seconds: PING_SEC_INTERVAL), (timer) {
           _sendMsgPing();
         });
       } else if (msg == 'failed') {
         _sessionId = null;
         _connectionStatus.connected = false;
         _connectionStatus.status = DdpConnectionStatusValues.failed;
-        _connectionStatus.reason =
-            'Failed connect to server. Protocol version ${dataMap['version']} is suggested!';
+        _connectionStatus.reason = 'Failed connect to server. Protocol version ${dataMap['version']} is suggested!';
         _statusStreamController.sink.add(_connectionStatus);
       }
-    } else if (_connectionStatus.status ==
-        DdpConnectionStatusValues.connected) {
+    } else if (_connectionStatus.status == DdpConnectionStatusValues.connected) {
       if (msg == 'ping') {
         _sendMsgPong();
       } else if (msg == 'pong') {
