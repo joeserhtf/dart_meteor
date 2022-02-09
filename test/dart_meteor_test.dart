@@ -64,8 +64,7 @@ void main() {
     });
 
     test('meteor.loginWithPassword', () async {
-      MeteorClientLoginResult result =
-          await meteor.loginWithPassword('user1', 'password1');
+      MeteorClientLoginResult result = await meteor.loginWithPassword('user1', 'password1');
       print('MeteorClientLoginResult: ' + result.toString());
       expect(meteor.userId(), isNotNull);
     });
@@ -79,6 +78,9 @@ void main() {
         onReady: () {
           print('onReady is called.');
           completer.complete(true);
+        },
+        onStop: (error) {
+          return () {};
         },
       );
       await Future.delayed(Duration(seconds: 5));

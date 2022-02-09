@@ -14,17 +14,17 @@ enum DdpConnectionStatusValues {
 }
 
 class DdpConnectionStatus {
-  bool connected;
-  DdpConnectionStatusValues status;
+  bool? connected;
+  DdpConnectionStatusValues? status;
   int retryCount;
   Duration retryTime;
-  String reason;
+  String? reason;
 
   DdpConnectionStatus({
     this.connected,
     this.status,
-    this.retryCount,
-    this.retryTime,
+    required this.retryCount,
+    required this.retryTime,
     this.reason,
   });
 
@@ -37,8 +37,8 @@ class DdpConnectionStatus {
 class SubscriptionHandler {
   DdpClient _ddpClient;
   String subId;
-  StreamController<bool> _readyStreamController = StreamController();
-  Stream<bool> _readyStream;
+  final StreamController<bool> _readyStreamController = StreamController();
+  late Stream<bool> _readyStream;
   SubscriptionHandler(this._ddpClient, this.subId) {
     _readyStream = _readyStreamController.stream.asBroadcastStream();
     _readyStreamController.sink.add(false);
@@ -48,7 +48,7 @@ class SubscriptionHandler {
   }
 
   void stop() {
-    if (_ddpClient != null && _ddpClient._connectionStatus.connected) {
+    if (_ddpClient != null && _ddpClient._connectionStatus!.connected!) {
       _ddpClient._sendMsgUnsub(subId);
     }
   }
@@ -56,19 +56,19 @@ class SubscriptionHandler {
 
 class SubscriptionCallback {
   Function onStop;
-  Function onReady;
-  SubscriptionCallback({this.onStop(dynamic error), this.onReady});
+  Function? onReady;
+  SubscriptionCallback({required this.onStop(dynamic error), this.onReady});
 }
 
 class OnReconnectionCallback {
-  DdpClient ddpClient;
-  String id;
-  Function callback;
+  DdpClient? ddpClient;
+  String? id;
+  Function? callback;
   OnReconnectionCallback({this.ddpClient, this.id, this.callback});
 
   void stop() {
     if (ddpClient != null) {
-      ddpClient._onReconnectCallbacks.remove(id);
+      ddpClient?._onReconnectCallbacks.remove(id);
     }
   }
 }
@@ -78,24 +78,24 @@ class DdpClient {
   final int PONG_WITHIN_SEC = 5;
   final Random _random = Random.secure();
 
-  StreamController<DdpConnectionStatus> _statusStreamController = StreamController();
+  StreamController<DdpConnectionStatus?> _statusStreamController = StreamController();
   StreamController<dynamic> dataStreamController = StreamController();
-  DdpConnectionStatus _connectionStatus;
-  String _url;
-  WebSocket _socket;
+  DdpConnectionStatus? _connectionStatus;
+  String? _url;
+  WebSocket? _socket;
   int _maxRetryCount = 20;
   Map<String, OnReconnectionCallback> _onReconnectCallbacks = {};
-  String _sessionId;
+  String? _sessionId;
   int _currentMethodId = 0;
   bool _flagToBeResetAtPongMsg = false;
-  Timer _pingPeriodicTimer;
+  Timer? _pingPeriodicTimer;
   Map<String, Completer<dynamic>> _methodCompleters = {};
   Map<String, SubscriptionCallback> _subscriptions = {};
   Map<String, SubscriptionHandler> _subscriptionHandlers = {};
   bool _isTryToReconnect = true;
-  Timer _scheduleReconnectTimer;
+  Timer? _scheduleReconnectTimer;
 
-  DdpClient({String url, int maxRetryCount = 20}) {
+  DdpClient({String? url, int maxRetryCount = 20}) {
     _url = url;
     _maxRetryCount = maxRetryCount;
     _connectionStatus = DdpConnectionStatus(
@@ -105,7 +105,7 @@ class DdpClient {
       retryTime: Duration(seconds: 0),
       reason: null,
     );
-    _statusStreamController.sink.add(_connectionStatus);
+    _statusStreamController.sink.add(_connectionStatus!);
     _connect();
   }
 
@@ -132,7 +132,8 @@ class DdpClient {
     return base64Url.encode(values);
   }
 
-  SubscriptionHandler subscribe(String name, List<dynamic> params, {Function onStop(dynamic error), Function onReady}) {
+  SubscriptionHandler subscribe(String name, List<dynamic> params,
+      {required Function onStop(dynamic error), Function? onReady}) {
     String id = name + '-' + _generateUID(16);
     _subscriptions[id] = SubscriptionCallback(onStop: onStop, onReady: onReady);
     var handler = SubscriptionHandler(this, id);
@@ -154,17 +155,17 @@ class DdpClient {
     return methodCompleter.future;
   }
 
-  Stream<DdpConnectionStatus> status() {
+  Stream<DdpConnectionStatus?> status() {
     return _statusStreamController.stream;
   }
 
   void reconnect() {
     print('reconnect... ${_connectionStatus}');
-    if (_connectionStatus.status != DdpConnectionStatusValues.connected &&
-        _connectionStatus.status != DdpConnectionStatusValues.connecting) {
+    if (_connectionStatus?.status != DdpConnectionStatusValues.connected &&
+        _connectionStatus?.status != DdpConnectionStatusValues.connecting) {
       if (_scheduleReconnectTimer != null) {
-        if (_scheduleReconnectTimer.isActive) {
-          _scheduleReconnectTimer.cancel();
+        if (_scheduleReconnectTimer?.isActive ?? false) {
+          _scheduleReconnectTimer?.cancel();
           _scheduleReconnectTimer = null;
         }
       }
@@ -176,12 +177,12 @@ class DdpClient {
     printDebug('Start of disconnect()');
     _isTryToReconnect = false;
     if (_socket != null) {
-      _socket.close();
+      _socket?.close();
       _socket = null;
     }
     // Cancel ping-pong timer
     if (_pingPeriodicTimer != null) {
-      _pingPeriodicTimer.cancel();
+      _pingPeriodicTimer?.cancel();
       _pingPeriodicTimer = null;
     }
 
@@ -189,33 +190,33 @@ class DdpClient {
     _flagToBeResetAtPongMsg = false;
 
     _sessionId = null;
-    _connectionStatus.connected = false;
-    _connectionStatus.status = DdpConnectionStatusValues.offline;
-    _connectionStatus.retryCount = 0;
-    _connectionStatus.reason = null;
+    _connectionStatus?.connected = false;
+    _connectionStatus?.status = DdpConnectionStatusValues.offline;
+    _connectionStatus?.retryCount = 0;
+    _connectionStatus?.reason = null;
     _statusStreamController.sink.add(_connectionStatus);
     printDebug('End of disconnect()');
   }
 
   void _connect() async {
-    if (_connectionStatus.status != DdpConnectionStatusValues.connected &&
-        _connectionStatus.status != DdpConnectionStatusValues.connecting) {
+    if (_connectionStatus?.status != DdpConnectionStatusValues.connected &&
+        _connectionStatus?.status != DdpConnectionStatusValues.connecting) {
       _isTryToReconnect = true;
-      _connectionStatus.status = DdpConnectionStatusValues.connecting;
-      _connectionStatus.reason = null;
+      _connectionStatus?.status = DdpConnectionStatusValues.connecting;
+      _connectionStatus?.reason = null;
       _statusStreamController.sink.add(_connectionStatus);
       try {
-        WebSocket socket = await WebSocket(_url); //.timeout(Duration(seconds: 5));
-        _connectionStatus.retryCount = 0;
-        _connectionStatus.retryTime = Duration(seconds: 1);
+        WebSocket socket = await WebSocket(_url!); //.timeout(Duration(seconds: 5));
+        _connectionStatus?.retryCount = 0;
+        _connectionStatus?.retryTime = Duration(seconds: 1);
         _socket = socket;
-        _socket.onMessage.listen(_onData);
-        _socket.onError.listen(_onError);
-        _socket.onClose.listen(_onDone);
+        _socket?.onMessage.listen(_onData);
+        _socket?.onError.listen(_onError);
+        _socket?.onClose.listen(_onDone);
       } catch (err) {
         print(err);
-        _connectionStatus.status = DdpConnectionStatusValues.failed;
-        _connectionStatus.reason = err.toString();
+        _connectionStatus?.status = DdpConnectionStatusValues.failed;
+        _connectionStatus?.reason = err.toString();
         _statusStreamController.sink.add(_connectionStatus);
         _socket = null;
         printDebug('ScheduleReconnect due to websocket exception while trying to connect');
@@ -226,31 +227,31 @@ class DdpClient {
   }
 
   void _scheduleReconnect() {
-    if (_connectionStatus.status == DdpConnectionStatusValues.offline ||
-        _connectionStatus.status == DdpConnectionStatusValues.failed) {
-      _connectionStatus.retryCount++;
-      if (_connectionStatus.retryCount <= _maxRetryCount) {
-        _connectionStatus.connected = false;
-        _connectionStatus.status = DdpConnectionStatusValues.waiting;
-        _connectionStatus.retryTime = Duration(seconds: min(5 * (_connectionStatus.retryCount - 1), 30));
-        _connectionStatus.reason = null;
+    if (_connectionStatus?.status == DdpConnectionStatusValues.offline ||
+        _connectionStatus?.status == DdpConnectionStatusValues.failed) {
+      _connectionStatus!.retryCount += 1;
+      if ((_connectionStatus?.retryCount ?? 0) <= _maxRetryCount) {
+        _connectionStatus?.connected = false;
+        _connectionStatus?.status = DdpConnectionStatusValues.waiting;
+        _connectionStatus?.retryTime = Duration(seconds: min(5 * (_connectionStatus!.retryCount - 1), 30));
+        _connectionStatus?.reason = null;
         _statusStreamController.sink.add(_connectionStatus);
-        printDebug('Retry to connect in ${_connectionStatus.retryTime}');
+        printDebug('Retry to connect in ${_connectionStatus?.retryTime}');
 
         if (_scheduleReconnectTimer != null) {
-          if (_scheduleReconnectTimer.isActive) {
-            _scheduleReconnectTimer.cancel();
+          if (_scheduleReconnectTimer?.isActive ?? false) {
+            _scheduleReconnectTimer?.cancel();
             _scheduleReconnectTimer = null;
           }
         }
-        _scheduleReconnectTimer = Timer(_connectionStatus.retryTime, () {
-          printDebug('Retry connect: ${_connectionStatus.retryCount}');
+        _scheduleReconnectTimer = Timer(_connectionStatus!.retryTime, () {
+          printDebug('Retry connect: ${_connectionStatus?.retryCount}');
           _connect();
         });
       } else {
-        _connectionStatus.connected = false;
-        _connectionStatus.status = DdpConnectionStatusValues.failed;
-        _connectionStatus.reason = 'DDP. Reach max retry attempt';
+        _connectionStatus?.connected = false;
+        _connectionStatus?.status = DdpConnectionStatusValues.failed;
+        _connectionStatus?.reason = 'DDP. Reach max retry attempt';
         _statusStreamController.sink.add(_connectionStatus);
       }
     }
@@ -264,11 +265,11 @@ class DdpClient {
         'support': ['1'],
       };
       if (_sessionId != null) {
-        data['session'] = _sessionId;
+        data['session'] = _sessionId!;
       }
       var msg = json.encode(data);
       printDebug('Send: $msg');
-      _socket.send(msg);
+      _socket?.send(msg);
     }
   }
 
@@ -276,7 +277,7 @@ class DdpClient {
     if (_socket != null) {
       var msg = json.encode({'msg': 'ping'});
       printDebug('Send: $msg');
-      _socket.send(msg);
+      _socket?.send(msg);
       DateTime sentTime = DateTime.now();
       _flagToBeResetAtPongMsg = true;
       Future.delayed(Duration(seconds: PONG_WITHIN_SEC), () {
@@ -296,7 +297,7 @@ class DdpClient {
     if (_socket != null) {
       var msg = json.encode({'msg': 'pong'});
       printDebug('Send: $msg');
-      _socket.send(msg);
+      _socket?.send(msg);
     }
   }
 
@@ -310,7 +311,7 @@ class DdpClient {
       };
       var msg = json.encode(data);
       printDebug('Send: $msg');
-      _socket.send(msg);
+      _socket?.send(msg);
     }
   }
 
@@ -322,11 +323,11 @@ class DdpClient {
       };
       var msg = json.encode(data);
       printDebug('Send: $msg');
-      _socket.send(msg);
+      _socket?.send(msg);
     }
   }
 
-  void _sendMsgMethod(String method, List<dynamic> params, String id, {Map<String, dynamic> randomSeed}) {
+  void _sendMsgMethod(String method, List<dynamic> params, String id, {Map<String, dynamic>? randomSeed}) {
     if (_socket != null) {
       var data = {
         'msg': 'method',
@@ -339,7 +340,7 @@ class DdpClient {
       }
       var msg = json.encode(data);
       printDebug('Send: $msg');
-      _socket.send(msg);
+      _socket?.send(msg);
     }
   }
 
@@ -347,23 +348,23 @@ class DdpClient {
     printDebug('Recv: ${event.data}');
     var dataMap = json.decode(event.data) ?? {};
     var msg = dataMap['msg'];
-    if (_connectionStatus.status == DdpConnectionStatusValues.connecting) {
+    if (_connectionStatus!.status == DdpConnectionStatusValues.connecting) {
       if (dataMap['server_id'] != null) {
         _sendMsgConnect();
       } else if (msg == 'connected') {
         _onReconnectCallbacks.values.forEach((reconnectCallback) {
-          reconnectCallback.callback(reconnectCallback);
+          reconnectCallback.callback!(reconnectCallback);
         });
 
-        _connectionStatus.connected = true;
-        _connectionStatus.status = DdpConnectionStatusValues.connected;
-        _connectionStatus.reason = null;
+        _connectionStatus?.connected = true;
+        _connectionStatus?.status = DdpConnectionStatusValues.connected;
+        _connectionStatus?.reason = null;
         _statusStreamController.sink.add(_connectionStatus);
         _sessionId = dataMap['session'];
 
         // Cancel ping-pong timer
         if (_pingPeriodicTimer != null) {
-          _pingPeriodicTimer.cancel();
+          _pingPeriodicTimer?.cancel();
           _pingPeriodicTimer = null;
         }
 
@@ -372,12 +373,12 @@ class DdpClient {
         });
       } else if (msg == 'failed') {
         _sessionId = null;
-        _connectionStatus.connected = false;
-        _connectionStatus.status = DdpConnectionStatusValues.failed;
-        _connectionStatus.reason = 'Failed connect to server. Protocol version ${dataMap['version']} is suggested!';
+        _connectionStatus?.connected = false;
+        _connectionStatus?.status = DdpConnectionStatusValues.failed;
+        _connectionStatus?.reason = 'Failed connect to server. Protocol version ${dataMap['version']} is suggested!';
         _statusStreamController.sink.add(_connectionStatus);
       }
-    } else if (_connectionStatus.status == DdpConnectionStatusValues.connected) {
+    } else if (_connectionStatus!.status == DdpConnectionStatusValues.connected) {
       if (msg == 'ping') {
         _sendMsgPong();
       } else if (msg == 'pong') {
@@ -385,7 +386,7 @@ class DdpClient {
       } else if (msg == 'nosub') {
         if (dataMap['id'] != null) {
           String id = dataMap['id'];
-          SubscriptionCallback sub = _subscriptions[id];
+          SubscriptionCallback? sub = _subscriptions[id];
           if (sub != null && sub.onStop != null) {
             sub.onStop(dataMap['error']);
             _subscriptions.remove(id);
@@ -393,7 +394,7 @@ class DdpClient {
           } else if (sub == null) {
             printDebug('Unknow nosub error!');
           }
-          SubscriptionHandler handler = _subscriptionHandlers[id];
+          SubscriptionHandler? handler = _subscriptionHandlers[id];
           if (handler != null) {
             _subscriptionHandlers.remove(id);
             handler = null;
@@ -410,11 +411,11 @@ class DdpClient {
         List subs = dataMap['subs'];
         if (subs != null) {
           subs.forEach((id) {
-            SubscriptionCallback sub = _subscriptions[id];
+            SubscriptionCallback? sub = _subscriptions[id];
             if (sub != null && sub.onReady != null) {
-              sub.onReady();
+              sub.onReady!();
             }
-            SubscriptionHandler handler = _subscriptionHandlers[id];
+            SubscriptionHandler? handler = _subscriptionHandlers[id];
             if (handler != null) {
               handler._readyStreamController.sink.add(true);
             }
@@ -425,7 +426,7 @@ class DdpClient {
       } else if (msg == 'result') {
         if (dataMap['id'] != null) {
           String id = dataMap['id'];
-          Completer<dynamic> completer = _methodCompleters[id];
+          Completer<dynamic>? completer = _methodCompleters[id];
           if (completer != null) {
             if (dataMap['error'] != null) {
               completer.completeError(dataMap['error']);
