@@ -266,6 +266,7 @@ class MeteorClient {
     try {
       return await connection.call(name, args);
     } catch (e) {
+      print(e);
       throw MeteorError.parse(e as Map<String, dynamic>);
     }
   }
@@ -394,7 +395,7 @@ class MeteorClient {
   /// [delayOnLoginErrorSecond]
   /// If login errors, delay for specificed second before throw an error.
   /// The user's password.
-  Future<MeteorClientLoginResult> loginWithPassword(String user, String password, {int delayOnLoginErrorSecond = 0}) {
+  Future<MeteorClientLoginResult>? loginWithPassword(String user, String password, {int delayOnLoginErrorSecond = 0}) {
     Completer<MeteorClientLoginResult> completer = Completer();
     _loggingIn = true;
     _loggingInSubject.add(_loggingIn);
@@ -443,7 +444,7 @@ class MeteorClient {
     return completer.future;
   }
 
-  Future<MeteorClientLoginResult> loginWithToken({String? token, DateTime? tokenExpires}) {
+  Future<MeteorClientLoginResult?> loginWithToken({String? token, DateTime? tokenExpires}) {
     _token = token;
     if (tokenExpires == null) {
       _tokenExpires = DateTime.now().add(Duration(hours: 1));
@@ -453,7 +454,7 @@ class MeteorClient {
     return _loginWithExistingToken();
   }
 
-  Future<MeteorClientLoginResult> _loginWithExistingToken() {
+  Future<MeteorClientLoginResult?> _loginWithExistingToken() {
     // Load existing token from localStorage
     if (window.localStorage.containsKey('Meteor.loginToken') &&
         window.localStorage.containsKey('Meteor.loginTokenExpires')) {
@@ -461,7 +462,7 @@ class MeteorClient {
       _tokenExpires = jsDateFormatter.parse(window.localStorage['Meteor.loginTokenExpires']!);
     }
 
-    Completer<MeteorClientLoginResult> completer = Completer();
+    Completer<MeteorClientLoginResult?> completer = Completer();
     print('Trying to login with existing token...');
     print('Token is ${_token}');
     if (_tokenExpires != null) {
