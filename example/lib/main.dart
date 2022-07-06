@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:dart_meteor_web/dart_meteor_web.dart';
 
-MeteorClient meteor = MeteorClient.connect(url: 'http://localhost:3000');
+MeteorClient meteor = MeteorClient.connect(url: 'wss://carajas.rocket.chat/websocket');
 void main() => runApp(MyApp());
 
 class MyApp extends StatefulWidget {
@@ -13,7 +13,7 @@ class _MyAppState extends State<MyApp> {
   String _methodResult = '';
 
   void _callMethod() {
-    meteor.call('helloMethod', []).then((result) {
+    meteor.call('helloMethod', args: []).then((result) {
       setState(() {
         _methodResult = result.toString();
       });
@@ -41,8 +41,7 @@ class _MyAppState extends State<MyApp> {
                 stream: meteor.status(),
                 builder: (context, snapshot) {
                   if (snapshot.hasData) {
-                    if (snapshot.data.status ==
-                        DdpConnectionStatusValues.connected) {
+                    if (snapshot.data.status == DdpConnectionStatusValues.connected) {
                       return ElevatedButton(
                         child: Text('Disconnect'),
                         onPressed: () {
@@ -83,8 +82,7 @@ class _MyAppState extends State<MyApp> {
                     return ElevatedButton(
                       child: Text('Login'),
                       onPressed: () {
-                        meteor.loginWithPassword(
-                            'yourusername', 'yourpassword');
+                        meteor.loginWithPassword('yourusername', 'yourpassword');
                       },
                     );
                   }),

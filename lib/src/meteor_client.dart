@@ -1,31 +1,28 @@
-import 'dart:html';
 import 'dart:async';
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:rxdart/rxdart.dart';
-import 'package:intl/intl.dart';
 import 'ddp_client.dart';
 
 class MeteorClientLoginResult {
   String userId;
   String token;
   DateTime tokenExpires;
-  MeteorClientLoginResult({this.userId, this.token, this.tokenExpires});
-
-  @override
-  String toString() {
-    return 'userId: $userId, token: $token, tokenExpires: $tokenExpires';
-  }
+  MeteorClientLoginResult({
+    required this.userId,
+    required this.token,
+    required this.tokenExpires,
+  });
 }
 
 class MeteorError extends Error {
-  String details;
+  String? details;
   dynamic error;
-  String errorType;
-  bool isClientSafe;
-  String message;
-  String reason;
-  String stack;
+  String? errorType;
+  bool isClientSafe = true;
+  String? message;
+  String? reason;
+  String? stack;
 
   MeteorError.parse(Map<String, dynamic> object) {
     try {
@@ -53,42 +50,48 @@ stack: $stack
   }
 }
 
-DateFormat jsDateFormatter = DateFormat('EEE MMM dd yyyy HH:mm:ss');
+enum UserLogInStatus {
+  loggedOut,
+  loggedIn,
+  loggingIn,
+  loggingOut,
+}
 
 class MeteorClient {
-  DdpClient connection;
+  late DdpClient connection;
 
-  BehaviorSubject<DdpConnectionStatus> _statusSubject = BehaviorSubject();
-  Stream<DdpConnectionStatus> _statusStream;
+  final BehaviorSubject<DdpConnectionStatus> _statusSubject = BehaviorSubject();
+  late Stream<DdpConnectionStatus> _statusStream;
 
-  BehaviorSubject<bool> _loggingInSubject = BehaviorSubject();
-  Stream<bool> _loggingInStream;
+  final BehaviorSubject<UserLogInStatus> _logInStatusSubject = BehaviorSubject.seeded(UserLogInStatus.loggedOut);
+  late Stream<UserLogInStatus> _logInStatusStream;
 
-  BehaviorSubject<String> _userIdSubject = BehaviorSubject();
-  Stream<String> _userIdStream;
+  final BehaviorSubject<bool> _loggingInSubject = BehaviorSubject();
+  late Stream<bool> _loggingInStream;
 
-  BehaviorSubject<Map<String, dynamic>> _userSubject = BehaviorSubject();
-  Stream<Map<String, dynamic>> _userStream;
+  final BehaviorSubject<String?> _userIdSubject = BehaviorSubject();
+  late Stream<String?> _userIdStream;
 
-  String _userId;
-  String _token;
-  DateTime _tokenExpires;
-  bool _loggingIn = false;
+  final BehaviorSubject<Map<String, dynamic>?> _userSubject = BehaviorSubject();
+  late Stream<Map<String, dynamic>?> _userStream;
 
-  Map<String, SubscriptionHandler> _subscriptions = {};
+  String? _userId;
+  String? _token;
+  DateTime? _tokenExpires;
+  UserLogInStatus _logInStatus = UserLogInStatus.loggedOut;
 
   /// Meteor.collections
-  Map<String, Map<String, dynamic>> _collections = {};
-  Map<String, BehaviorSubject<Map<String, dynamic>>> _collectionsSubject = {};
-  Map<String, Stream<Map<String, dynamic>>> collections = {};
+  final Map<String, Map<String, dynamic>> _collections = {};
+  final Map<String, BehaviorSubject<Map<String, dynamic>>> _collectionsSubject = {};
+  final Map<String, Stream<Map<String, dynamic>>> _collectionsStreams = {};
 
-  MeteorClient.connect({String url}) {
+  MeteorClient.connect({required String url, bool debug = false, userAgent = 'DartMeteor/2.0.4'}) {
     url = url.replaceFirst(RegExp(r'^http'), 'ws');
     if (!url.endsWith('websocket')) {
       url = url.replaceFirst(RegExp(r'/$'), '') + '/websocket';
     }
-    print('connecting to $url');
-    connection = DdpClient(url: url);
+    print('MeteorClient[$hashCode] - Make a connection to $url');
+    connection = DdpClient(url: url, debug: debug, userAgent: userAgent);
 
     connection.status().listen((ddpStatus) {
       _statusSubject.add(ddpStatus);
@@ -102,10 +105,14 @@ class MeteorClient {
     _statusStream = _statusSubject.stream;
 
     _loggingInStream = _loggingInSubject.stream;
+    _logInStatusStream = _logInStatusSubject.stream;
+    _logInStatusStream.listen((event) {
+      _loggingInSubject.add(event == UserLogInStatus.loggingIn);
+    });
     _userIdStream = _userIdSubject.stream;
     _userStream = _userSubject.stream;
 
-    prepareCollection('users');
+    _prepareCollection('users');
 
     connection.dataStreamController.stream.listen((data) {
       String collectionName = data['collection'];
@@ -113,47 +120,46 @@ class MeteorClient {
       dynamic fields = data['fields'];
       if (fields != null) {
         fields['_id'] = id;
+        DdpClient.formatSpecialFieldValues(fields);
       }
 
-      if (_collections[collectionName] == null) {
-        _collections[collectionName] = {};
-        _collectionsSubject[collectionName] = BehaviorSubject<Map<String, dynamic>>();
-        collections[collectionName] = _collectionsSubject[collectionName].stream;
-      }
+      _prepareCollection(collectionName);
 
       if (data['msg'] == 'removed') {
-        _collections[collectionName].remove(id);
+        _collections[collectionName]!.remove(id);
       } else if (data['msg'] == 'added') {
         if (fields != null) {
-          _collections[collectionName][id] = fields;
+          _collections[collectionName]![id] = fields;
         }
       } else if (data['msg'] == 'changed') {
         if (fields != null) {
-          fields.forEach((k, v) {
-            if (_collections[collectionName][id] != null && _collections[collectionName][id] is Map) {
-              _collections[collectionName][id][k] = v;
-            }
-          });
+          if (_collections[collectionName]![id] != null && _collections[collectionName]![id] is Map) {
+            fields.forEach((k, v) {
+              _collections[collectionName]![id][k] = v;
+            });
+          }
         } else if (data['cleared'] != null && data['cleared'] is List) {
           List<dynamic> clearList = data['cleared'];
-          if (_collections[collectionName][id] != null && _collections[collectionName][id] is Map) {
+          if (_collections[collectionName]![id] != null && _collections[collectionName]![id] is Map) {
             clearList.forEach((k) {
-              _collections[collectionName][id].remove(k);
+              _collections[collectionName]![id].remove(k);
             });
           }
         }
       }
 
-      _collectionsSubject[collectionName].add(_collections[collectionName]);
+      _collectionsSubject[collectionName]!.add(_collections[collectionName]!);
       if (collectionName == 'users' && id == _userId) {
-        _userSubject.add(_collections['users'][_userId]);
+        if (_collections['users'] != null && _collections['users']![_userId] != null) {
+          _userSubject.add(_collections['users']![_userId]);
+        }
       }
     })
       ..onError((dynamic error) {})
       ..onDone(() {});
 
     connection.onReconnect((OnReconnectionCallback reconnectionCallback) {
-      print('connection.onReconnect()');
+      print('MeteorClient[$hashCode] - connection.onReconnect()');
       _loginWithExistingToken().catchError((error) {});
     });
 
@@ -171,18 +177,36 @@ class MeteorClient {
     });
 
     userId().listen((userId) {
-      _userSubject.add(_collections['users'][userId]);
+      if (_collections['users'] != null && _collections['users']![userId] != null) {
+        _userSubject.add(_collections['users']![userId]);
+      } else {
+        _userSubject.add(null);
+      }
     });
   }
 
-  /// To make sure that the stream is not null when accessing them through `collections`
-  /// If you not call prepareCollection, the stream will be null until it got data from ddp `collection` message.
-  void prepareCollection(String collectionName) {
+  void _prepareCollection(String collectionName) {
     if (_collections[collectionName] == null) {
       _collections[collectionName] = {};
       var subject = _collectionsSubject[collectionName] = BehaviorSubject<Map<String, dynamic>>();
-      collections[collectionName] = subject.stream;
+      subject.add({});
+      _collectionsStreams[collectionName] = subject.stream;
     }
+  }
+
+  /// Get [Stream] of `collection` on given a `collectionName`.
+  Stream<Map<String, dynamic>> collection(String collectionName) {
+    if (_collections[collectionName] == null) {
+      _prepareCollection(collectionName);
+    }
+    return _collectionsStreams[collectionName]!;
+  }
+
+  Map<String, dynamic>? collectionCurrentValue(String collectionName) {
+    if (_collections[collectionName] == null) {
+      _prepareCollection(collectionName);
+    }
+    return _collectionsSubject[collectionName]!.valueOrNull;
   }
 
   // ===========================================================
@@ -205,16 +229,16 @@ class MeteorClient {
 
   /// Boolean variable. True if running in development environment.
   bool isDevelopment() {
-    return !bool.fromEnvironment("dart.vm.product");
+    return !bool.fromEnvironment('dart.vm.product');
   }
 
   /// Boolean variable. True if running in production environment.
   bool isProduction() {
-    return bool.fromEnvironment("dart.vm.product");
+    return bool.fromEnvironment('dart.vm.product');
   }
 
   bool isAlreadyRunStartupFunctions = false;
-  List<Function> _startupFunctions = [];
+  final List<Function> _startupFunctions = [];
 
   /// Run code when a client successfully make a connection to server.
   void startup(Function func) {
@@ -223,7 +247,7 @@ class MeteorClient {
 
   // Meteor.wrapAsync(func, [context])
 
-  void defer(Function func) {
+  void defer(Function Function() func) {
     Future.delayed(Duration(seconds: 0), func);
   }
 
@@ -241,15 +265,11 @@ class MeteorClient {
   /// `name`
   /// Name of the subscription. Matches the name of the server's publish() call.
   ///
-  /// `params`
+  /// `args`
   /// Arguments passed to publisher function on server.
-  SubscriptionHandler subscribe(String name, List<dynamic> params, {Function onStop(dynamic error), Function onReady}) {
-    // TODO: not subscribe with same name and params.
-    SubscriptionHandler handler = connection.subscribe(name, params, onStop: onStop, onReady: onReady);
-    if (_subscriptions[name] != null) {
-      _subscriptions[name].stop();
-    }
-    _subscriptions[name] = handler;
+  SubscriptionHandler subscribe(String name,
+      {List<dynamic> args = const [], Function Function(dynamic error)? onStop, Function? onReady}) {
+    var handler = connection.subscribe(name, args, onStop: onStop, onReady: onReady);
     return handler;
   }
 
@@ -261,11 +281,14 @@ class MeteorClient {
   /// `name` Name of method to invoke
   ///
   /// `args` List of method arguments
-  Future<dynamic> call(String name, List<dynamic> args) async {
+  Future<dynamic> call(String name, {List<dynamic> args = const []}) async {
     try {
       return await connection.call(name, args);
     } catch (e) {
-      throw MeteorError.parse(e);
+      if (e is Map<String, dynamic>) {
+        throw MeteorError.parse(e);
+      }
+      rethrow;
     }
   }
 
@@ -278,7 +301,10 @@ class MeteorClient {
     try {
       return await connection.apply(name, args);
     } catch (e) {
-      throw MeteorError.parse(e);
+      if (e is Map<String, dynamic>) {
+        throw MeteorError.parse(e);
+      }
+      rethrow;
     }
   }
 
@@ -305,25 +331,31 @@ class MeteorClient {
   // Accounts
 
   /// Get the current user record, or null if no user is logged in. A reactive data source.
-  Stream<Map<String, dynamic>> user() {
+  Stream<Map<String, dynamic>?> user() {
     return _userStream;
   }
 
-  Map<String, dynamic> userCurrentValue() {
-    return _userSubject.value;
+  Map<String, dynamic>? userCurrentValue() {
+    return _userSubject.valueOrNull;
   }
 
   /// Get the current user id, or null if no user is logged in. A reactive data source.
-  Stream<String> userId() {
+  Stream<String?> userId() {
     return _userIdStream;
   }
 
-  String userIdCurrentValue() {
-    return _userIdSubject.value;
+  String? userIdCurrentValue() {
+    return _userIdSubject.valueOrNull;
   }
 
   /// A Map containing user documents.
-  Stream<Map<String, dynamic>> get users => collections['users'];
+  Stream<Map<String, dynamic>> get users => _collectionsStreams['users']!;
+
+  /// Current log-in status of login methods (such as Meteor.loginWithPassword, Meteor.loginWithFacebook, or Accounts.createUser).
+  /// A reactive data source.
+  Stream<UserLogInStatus> logInStatus() {
+    return _logInStatusStream;
+  }
 
   /// True if a login method (such as Meteor.loginWithPassword, Meteor.loginWithFacebook, or Accounts.createUser) is currently in progress.
   /// A reactive data source.
@@ -333,21 +365,22 @@ class MeteorClient {
 
   /// Log the user out.
   Future logout() {
-    Completer completer = Completer();
-    call('logout', []).then((result) {
+    _logInStatus = UserLogInStatus.loggingOut;
+    var completer = Completer();
+    call('logout').then((result) {
       _userId = null;
       _token = null;
       _tokenExpires = null;
-      _loggingIn = false;
-      _loggingInSubject.add(_loggingIn);
+      _logInStatus = UserLogInStatus.loggedOut;
+      _logInStatusSubject.add(_logInStatus);
       _userIdSubject.add(_userId);
       completer.complete();
     }).catchError((error) {
       _userId = null;
       _token = null;
       _tokenExpires = null;
-      _loggingIn = false;
-      _loggingInSubject.add(_loggingIn);
+      _logInStatus = UserLogInStatus.loggedOut;
+      _logInStatusSubject.add(_logInStatus);
       _userIdSubject.add(_userId);
       connection.disconnect();
       Future.delayed(Duration(seconds: 2), () {
@@ -359,23 +392,25 @@ class MeteorClient {
   }
 
   /// Log out other clients logged in as the current user, but does not log out the client that calls this function.
-  Future logoutOtherClients() {
-    Completer<String> completer = Completer();
-    call('getNewToken', []).then((result) {
+  Future<MeteorClientLoginResult> logoutOtherClients() {
+    var completer = Completer<MeteorClientLoginResult>();
+    _logInStatus = UserLogInStatus.loggingIn;
+    call('getNewToken').then((result) {
       _userId = result['id'];
       _token = result['token'];
-      _tokenExpires = DateTime.fromMillisecondsSinceEpoch(result['tokenExpires']['\$date']);
-
-      // Save to localStorage
-      window.localStorage['Meteor.loginToken'] = _token;
-      window.localStorage['Meteor.loginTokenExpires'] = jsDateFormatter.format(_tokenExpires);
-      window.localStorage['Meteor.userId'] = _userId;
-
-      _loggingIn = false;
-      _loggingInSubject.add(_loggingIn);
+      _tokenExpires = result['tokenExpires'];
+      _logInStatus = UserLogInStatus.loggedIn;
+      _logInStatusSubject.add(_logInStatus);
       _userIdSubject.add(_userId);
-      return call('removeOtherTokens', []);
+      call('removeOtherTokens').then((value) {
+        completer.complete(MeteorClientLoginResult(
+          userId: _userId!,
+          token: _token!,
+          tokenExpires: _tokenExpires!,
+        ));
+      });
     }).catchError((error) {
+      _logInStatus = UserLogInStatus.loggedOut;
       completer.completeError(error);
     });
     return completer.future;
@@ -394,55 +429,19 @@ class MeteorClient {
   /// If login errors, delay for specificed second before throw an error.
   /// The user's password.
   Future<MeteorClientLoginResult> loginWithPassword(String user, String password, {int delayOnLoginErrorSecond = 0}) {
-    Completer<MeteorClientLoginResult> completer = Completer();
-    _loggingIn = true;
-    _loggingInSubject.add(_loggingIn);
-
-    var selector;
-    if (!user.contains('@')) {
-      selector = {'username': user};
-    } else {
-      selector = {'email': user};
-    }
-
-    call('login', [
+    return login(
       {
-        'user': selector,
+        'user': !user.contains('@') ? {'username': user} : {'email': user},
         'password': {'digest': sha256.convert(utf8.encode(password)).toString(), 'algorithm': 'sha-256'},
-      }
-    ]).then((result) {
-      _userId = result['id'];
-      _token = result['token'];
-      _tokenExpires = DateTime.fromMillisecondsSinceEpoch(result['tokenExpires']['\$date']);
-
-      // Save to localStorage
-      window.localStorage['Meteor.loginToken'] = _token;
-      window.localStorage['Meteor.loginTokenExpires'] = jsDateFormatter.format(_tokenExpires);
-      window.localStorage['Meteor.userId'] = _userId;
-
-      _loggingIn = false;
-      _loggingInSubject.add(_loggingIn);
-      _userIdSubject.add(_userId);
-      completer.complete(MeteorClientLoginResult(
-        userId: _userId,
-        token: _token,
-        tokenExpires: _tokenExpires,
-      ));
-    }).catchError((error) {
-      Future.delayed(Duration(seconds: delayOnLoginErrorSecond), () {
-        _userId = null;
-        _token = null;
-        _tokenExpires = null;
-        _loggingIn = false;
-        _loggingInSubject.add(_loggingIn);
-        _userIdSubject.add(_userId);
-        completer.completeError(error);
-      });
-    });
-    return completer.future;
+      },
+      delayOnLoginErrorSecond: delayOnLoginErrorSecond,
+    );
   }
 
-  Future<MeteorClientLoginResult> loginWithToken({String token, DateTime tokenExpires}) {
+  Future<MeteorClientLoginResult?> loginWithToken({
+    required String token,
+    DateTime? tokenExpires,
+  }) {
     _token = token;
     if (tokenExpires == null) {
       _tokenExpires = DateTime.now().add(Duration(hours: 1));
@@ -452,58 +451,59 @@ class MeteorClient {
     return _loginWithExistingToken();
   }
 
-  Future<MeteorClientLoginResult> _loginWithExistingToken() {
-    // Load existing token from localStorage
-    if (window.localStorage.containsKey('Meteor.loginToken') &&
-        window.localStorage.containsKey('Meteor.loginTokenExpires')) {
-      _token = window.localStorage['Meteor.loginToken'];
-      _tokenExpires = jsDateFormatter.parse(window.localStorage['Meteor.loginTokenExpires']);
-    }
-
-    Completer<MeteorClientLoginResult> completer = Completer();
-    print('Trying to login with existing token...');
-    print('Token is ${_token}');
+  Future<MeteorClientLoginResult?> _loginWithExistingToken() {
+    var completer = Completer<MeteorClientLoginResult?>();
+    print('MeteorClient[$hashCode] - Trying to login with existing token...');
     if (_tokenExpires != null) {
-      print('Token expires ${_tokenExpires.toString()}');
-      print('now is ${DateTime.now()}');
-      print('Token expires is after now ${_tokenExpires.isAfter(DateTime.now())}');
+      print('MeteorClient[$hashCode] - Token expires ${_tokenExpires!.toString()}');
+      print('MeteorClient[$hashCode] - Current time is ${DateTime.now()}');
+      print(
+        'MeteorClient[$hashCode] - Token expires is after now ${_tokenExpires!.isAfter(DateTime.now())}',
+      );
     }
 
-    if (_token != null && _tokenExpires != null && _tokenExpires.isAfter(DateTime.now())) {
-      _loggingIn = true;
-      _loggingInSubject.add(_loggingIn);
-      call('login', [
-        {'resume': _token}
-      ]).then((result) {
-        _userId = result['id'];
-        _token = result['token'];
-        _tokenExpires = DateTime.fromMillisecondsSinceEpoch(result['tokenExpires']['\$date']);
-
-        // Save to localStorage
-        window.localStorage['Meteor.loginToken'] = _token;
-        window.localStorage['Meteor.loginTokenExpires'] = jsDateFormatter.format(_tokenExpires);
-        window.localStorage['Meteor.userId'] = _userId;
-
-        _loggingIn = false;
-        _loggingInSubject.add(_loggingIn);
-        _userIdSubject.add(_userId);
-        completer.complete(MeteorClientLoginResult(
-          userId: _userId,
-          token: _token,
-          tokenExpires: _tokenExpires,
-        ));
-      }).catchError((error) {
-        _userId = null;
-        _token = null;
-        _tokenExpires = null;
-        _loggingIn = false;
-        _loggingInSubject.add(_loggingIn);
-        _userIdSubject.add(_userId);
-        completer.completeError(error);
-      });
+    if (_token != null && _tokenExpires != null && _tokenExpires!.isAfter(DateTime.now())) {
+      return login({'resume': _token});
     } else {
       completer.complete(null);
     }
+
+    return completer.future;
+  }
+
+  Future<MeteorClientLoginResult> login(
+    Map<String, dynamic> loginData, {
+    int delayOnLoginErrorSecond = 0,
+  }) {
+    var completer = Completer<MeteorClientLoginResult>();
+    _logInStatus = UserLogInStatus.loggingIn;
+    _logInStatusSubject.add(_logInStatus);
+
+    call('login', args: [
+      loginData,
+    ]).then((result) {
+      _userId = result['id'];
+      _token = result['token'];
+      _tokenExpires = result['tokenExpires'];
+      _logInStatus = UserLogInStatus.loggedIn;
+      _logInStatusSubject.add(_logInStatus);
+      _userIdSubject.add(_userId);
+      completer.complete(MeteorClientLoginResult(
+        userId: _userId!,
+        token: _token!,
+        tokenExpires: _tokenExpires!,
+      ));
+    }).catchError((error) {
+      Future.delayed(Duration(seconds: delayOnLoginErrorSecond), () {
+        _userId = null;
+        _token = null;
+        _tokenExpires = null;
+        _logInStatus = UserLogInStatus.loggedOut;
+        _logInStatusSubject.add(_logInStatus);
+        _userIdSubject.add(_userId);
+        completer.completeError(error);
+      });
+    });
     return completer.future;
   }
 
@@ -512,7 +512,7 @@ class MeteorClient {
 
   /// Change the current user's password. Must be logged in.
   Future<dynamic> changePassword(String oldPassword, String newPassword) {
-    return call('changePassword', [oldPassword, newPassword]);
+    return call('changePassword', args: [oldPassword, newPassword]);
   }
 
   /// Request a forgot password email.
@@ -520,7 +520,7 @@ class MeteorClient {
   /// [email]
   /// The email address to send a password reset link.
   Future<dynamic> forgotPassword(String email) {
-    return call('forgotPassword', [
+    return call('forgotPassword', args: [
       {'email': email}
     ]);
   }
@@ -533,6 +533,6 @@ class MeteorClient {
   /// [newPassword]
   /// A new password for the user. This is not sent in plain text over the wire.
   Future<dynamic> resetPassword(String token, String newPassword) {
-    return call("resetPassword", [token, newPassword]);
+    return call('resetPassword', args: [token, newPassword]);
   }
 }

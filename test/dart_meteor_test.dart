@@ -34,7 +34,7 @@ void main() {
 
     test('It should throw error as integer', () async {
       try {
-        await meteor.call('methodThatThrowErrorAsInt', []);
+        await meteor.call('methodThatThrowErrorAsInt', args: []);
       } on MeteorError catch (e) {
         expect(e.error, 500);
         expect(e.reason, 'This is an error');
@@ -43,7 +43,7 @@ void main() {
 
     test('It should throw error as string', () async {
       try {
-        await meteor.call('methodThatThrowErrorAsString', []);
+        await meteor.call('methodThatThrowErrorAsString', args: []);
       } on MeteorError catch (e) {
         expect(e.error, 'error');
         expect(e.reason, 'This is an error');
@@ -64,8 +64,7 @@ void main() {
     });
 
     test('meteor.loginWithPassword', () async {
-      MeteorClientLoginResult result =
-          await meteor.loginWithPassword('user1', 'password1');
+      MeteorClientLoginResult result = await meteor.loginWithPassword('user1', 'password1');
       print('MeteorClientLoginResult: ' + result.toString());
       expect(meteor.userId(), isNotNull);
     });
@@ -75,7 +74,7 @@ void main() {
       expect(completer.future, completion(true));
       await meteor.subscribe(
         'messages',
-        [],
+        args: [],
         onReady: () {
           print('onReady is called.');
           completer.complete(true);
